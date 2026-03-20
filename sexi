@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""
+Simple EXecutable Ini (SEXI)
+Runs Windows executables with configuration stored in ini file
+"""
+import configparser
+import os
+import shlex
+import subprocess
+import sys
+
+def abort(message: str):
+    if sys.stdin.isatty():
+        sys.stderr.writelines([message])
+    else:
+        subprocess.run(["/usr/bin/zenity", "--error", "--no-wrap", "--text", message])
+    sys.exit(1)
+
+def run(prefix: str, compatibility_tool: str, runner_version: str, program: str, working_directory: str, arguments: list[str], extra_env: dict[str, str]):
+    env = os.environ.copy()
+    program_path = os.path.join(working_directory, program)
+    command = [program_path] + arguments
+    if compatibility_tool in ["umu", "proton"]:
+        steam_path = os.path.join(os.environ["HOME"], ".steam", "steam")
+        proton_path = os.path.join(steam_path, "compatibilitytools.d", runner_version)
+        env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = steam_path
+        if compatibility_tool == "umu":
+            env["WINEPREFIX"] = prefix
+            env["GAMEID"] = "umu-default"
+            env["STORE"] = "none"
+            env["PROTONPATH"] = proton_path
+            command = ["/usr/bin/umu-run"] + command
+        elif compatibility_tool == "proton":
+            env["STEAM_COMPAT_DATA_PATH"] = prefix
+            proton_binary_path = os.path.join(proton_path, "proton")
+            command = [proton_binary_path, "run"] + command
+    elif compatibility_tool == "lutris-wine":
+        wine_path = os.path.join(env["HOME"], ".local", "share", "lutris", "runners", "wine", runner_version, "bin", "wine")
+        command = [wine_path] + command
+        env["WINEPREFIX"] = prefix
+    else:
+        raise ValueError(f"Unknown compatibility tool {compatibility_tool}")
+    env.update(extra_env)
+    p = subprocess.Popen(command, cwd=working_directory, env=env)
+    p.communicate()
+
+def main():
+    try:
+        assert len(sys.argv) == 2, "Incorrect number of arguments"
+        ini_path = sys.argv[1]
+        assert os.path.isfile(ini_path), f"ini file not found: {ini_path}"
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(ini_path)
+        assert 'main' in config.sections(), "main section is missing from ini file"
+        main_section = config["main"]
+        required_keys = ["prefix", "compatibility_tool", "runner_version", "program"]
+        missing_keys = []
+        for key in required_keys:
+            if key not in main_section:
+                missing_keys.append(key)
+        assert not missing_keys, f"Missing required values in section 'main':\n{', '.join(missing_keys)}"
+        working_directory = main_section["working_directory"] if 'working_directory' in main_section else os.path.dirname(ini_path)
+        arguments = shlex.split(main_section["arguments"]) if 'arguments' in main_section else []
+        extra_env = dict(config.items("env")) if 'env' in config.sections() else {}
+        run(
+            prefix=main_section['prefix'],
+            compatibility_tool=main_section['compatibility_tool'],
+            runner_version=main_section['runner_version'],
+            program=main_section['program'],
+            working_directory=working_directory,
+            arguments=arguments,
+            extra_env=extra_env
+        )
+    except AssertionError as e:
+        abort(str(e))
+    except Exception as e:
+        abort(e.__class__.__name__ + ": " + str(e))
+
+if __name__ == '__main__':
+    main()
