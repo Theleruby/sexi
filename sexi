@@ -52,7 +52,7 @@ def main():
         config = configparser.ConfigParser()
         config.optionxform = str
         config.read(ini_path)
-        assert 'main' in config.sections(), "main section is missing from ini file"
+        assert "main" in config.sections(), "main section is missing from ini file"
         main_section = config["main"]
         required_keys = ["prefix", "compatibility_tool", "runner_version", "program"]
         missing_keys = []
@@ -60,22 +60,24 @@ def main():
             if key not in main_section:
                 missing_keys.append(key)
         assert not missing_keys, f"Missing required values in section 'main':\n{', '.join(missing_keys)}"
-        working_directory = main_section["working_directory"] if 'working_directory' in main_section else os.path.dirname(ini_path)
-        arguments = shlex.split(main_section["arguments"]) if 'arguments' in main_section else []
-        extra_env = dict(config.items("env")) if 'env' in config.sections() else {}
+        working_directory = main_section["working_directory"] if "working_directory" in main_section else os.path.dirname(ini_path)
+        arguments = shlex.split(main_section["arguments"]) if "arguments" in main_section else []
+        extra_env = dict(config.items("env")) if "env" in config.sections() else {}
         run(
-            prefix=main_section['prefix'],
-            compatibility_tool=main_section['compatibility_tool'],
-            runner_version=main_section['runner_version'],
-            program=main_section['program'],
+            prefix=main_section["prefix"],
+            compatibility_tool=main_section["compatibility_tool"],
+            runner_version=main_section["runner_version"],
+            program=main_section["program"],
             working_directory=working_directory,
             arguments=arguments,
             extra_env=extra_env
         )
     except AssertionError as e:
         abort(str(e))
+    except ValueError as e:
+        abort(str(e))
     except Exception as e:
         abort(e.__class__.__name__ + ": " + str(e))
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
