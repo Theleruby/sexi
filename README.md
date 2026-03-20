@@ -49,5 +49,11 @@ runner_version = GE-Proton9-27
 program = Wow.exe
 ```
 
+## How to run a .sexi from a .desktop file
+Assuming you have .sexi files associated with SEXI:
+* Set the program to `xdg-open`
+* Set the command-line arguments to the path to the .sexi file
+* That's literally it
+
 ## License
 Licensed under the MIT license.
