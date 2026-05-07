@@ -6,8 +6,11 @@ Runs Windows executables with configuration stored in ini file
 import configparser
 import os
 import shlex
+import string
 import subprocess
 import sys
+
+SEXI_VERSION = "0.0.2"
 
 def abort(message: str):
     if sys.stdin.isatty():
@@ -16,18 +19,32 @@ def abort(message: str):
         subprocess.run(["/usr/bin/zenity", "--error", "--no-wrap", "--text", message])
     sys.exit(1)
 
-def run(prefix: str, compatibility_tool: str, runner_version: str, program: str, working_directory: str, arguments: list[str], extra_env: dict[str, str]):
+def is_truthy(s: str):
+    return s.lower() in ["1", "yes", "y", "true", "enabled"]
+
+def validate_prefix(prefix: str):
+    if "/" in prefix:
+        assert os.path.exists(prefix), "Prefix path doesn't exist"
+    else:
+        assert set(prefix) <= set(string.ascii_lowercase + string.ascii_uppercase + string.digits + '-_'), "Invalid characters in prefix"
+        prefix = os.path.expanduser(f"~/.pfx/{prefix}")
+        os.makedirs(prefix, exist_ok=True)
+    return prefix
+
+def run(prefix: str, compatibility_tool: str, runner_version: str, program: str, working_directory: str, arguments: list[str], extra_env: dict[str, str], gameid: str, store: str, mangohud: bool):
     env = os.environ.copy()
+    env.update(extra_env)
     program_path = os.path.join(working_directory, program)
     command = [program_path] + arguments
     if compatibility_tool in ["umu", "proton"]:
-        steam_path = os.path.join(os.environ["HOME"], ".steam", "steam")
+        steam_path = os.path.join(os.environ["HOME"], ".steam", "root")
         proton_path = os.path.join(steam_path, "compatibilitytools.d", runner_version)
+        assert os.path.exists(proton_path), f"Requested runner '{runner_version}' not found. Please install it and try again."
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = steam_path
         if compatibility_tool == "umu":
             env["WINEPREFIX"] = prefix
-            env["GAMEID"] = "umu-default"
-            env["STORE"] = "none"
+            env["GAMEID"] = gameid
+            env["STORE"] = store
             env["PROTONPATH"] = proton_path
             command = ["/usr/bin/umu-run"] + command
         elif compatibility_tool == "proton":
@@ -36,18 +53,57 @@ def run(prefix: str, compatibility_tool: str, runner_version: str, program: str,
             command = [proton_binary_path, "run"] + command
     elif compatibility_tool == "lutris-wine":
         wine_path = os.path.join(env["HOME"], ".local", "share", "lutris", "runners", "wine", runner_version, "bin", "wine")
+        assert os.path.exists(wine_path), f"Requested runner '{runner_version}' not found. Please install it and try again."
         command = [wine_path] + command
         env["WINEPREFIX"] = prefix
     else:
         raise ValueError(f"Unknown compatibility tool {compatibility_tool}")
-    env.update(extra_env)
+    if mangohud and not env.get("XDG_CURRENT_DESKTOP") == "gamescope": # ignore mangohud=1 when using gamescope
+        command = ["/usr/bin/mangohud"] + command
     p = subprocess.Popen(command, cwd=working_directory, env=env)
     p.communicate()
 
+def print_help():
+    print(f"Simple EXecutable Ini (SEXI), version {SEXI_VERSION}")
+    print("https://github.com/Theleruby/sexi")
+    print("")
+    print("Usage:  sexi <config.sexi>")
+    print("")
+    print("Runs a Windows .exe file using configuration settings stored in an ini file with a .sexi file extension.")
+    print("")
+    print("You can run the .exe using Proton, UMU-Launcher or Lutris Wine. Most software runs fine using GE-Proton9-27 directly, which you")
+    print("can try as a relatively safe first option, but this might not work for everything. Some software runs better using other runners.")
+    print("UMU-Launcher wraps Proton in the Steam runtime container and can make use of protonfixes for some games, improving compatibility,")
+    print("but it will result in the game starting slowly if a runtime update is available. Lutris Wine can be used as a last resort.")
+    print("")
+    print("Note that currently the requested runner version must already be installed. You can install it with ProtonPlus if needed.")
+    print("")
+    print("---------- REQUIRED VALUES -----------------------------------------------------------------------------------------------")
+    print("[main]")
+    print("prefix = [full path or prefix name]                 (full path must exist, prefix name will be autocreated in ~/.pfx/)")
+    print("compatibility_tool = [proton | umu | lutris-wine]   (you must have the appropriate tool installed)")
+    print("runner_version = [desired proton version]           (you must have this proton or wine version already installed)")
+    print("program = [program-name.exe]                        (path to exe from working directory)")
+    print("")
+    print("---------- OPTIONAL VALUES -----------------------------------------------------------------------------------------------")
+    print("[main]")
+    print("working_directory = [directory]                     (defaults to the directory containing the sexi file)")
+    print("arguments = [extra command line arguments]          (e.g. -window)")
+    print("mangohud = [true | false]                           (defaults to false, ignored if gamescope session is detected)")
+    print("gameid = [gameid]                                   (umu gameid, only used when using umu, defaults to umu-default)")
+    print("store = [store]                                     (umu store, only used when using umu, defaults to none)")
+    print("")
+    print("[env]")
+    print("ANY_EXTRA_ENVIRONMENT = variables_here              (just declare as many as you need)")
+    print("")
+
 def main():
+    if len(sys.argv) == 1:
+        print_help()
+        return
     try:
         assert len(sys.argv) == 2, "Incorrect number of arguments"
-        ini_path = sys.argv[1]
+        ini_path = os.path.abspath(sys.argv[1])
         assert os.path.isfile(ini_path), f"ini file not found: {ini_path}"
         config = configparser.ConfigParser()
         config.optionxform = str
@@ -57,20 +113,27 @@ def main():
         required_keys = ["prefix", "compatibility_tool", "runner_version", "program"]
         missing_keys = []
         for key in required_keys:
-            if key not in main_section:
+            if key not in main_section or not main_section[key].strip():
                 missing_keys.append(key)
         assert not missing_keys, f"Missing required values in section 'main':\n{', '.join(missing_keys)}"
         working_directory = main_section["working_directory"] if "working_directory" in main_section else os.path.dirname(ini_path)
         arguments = shlex.split(main_section["arguments"]) if "arguments" in main_section else []
         extra_env = dict(config.items("env")) if "env" in config.sections() else {}
+        mangohud = "mangohud" in main_section and is_truthy(main_section["mangohud"])
+        gameid = main_section["gameid"] if "gameid" in main_section else "umu-default"
+        store = main_section["store"] if "store" in main_section else "none"
+        prefix = validate_prefix(main_section["prefix"])
         run(
-            prefix=main_section["prefix"],
+            prefix=prefix,
             compatibility_tool=main_section["compatibility_tool"],
             runner_version=main_section["runner_version"],
             program=main_section["program"],
             working_directory=working_directory,
             arguments=arguments,
-            extra_env=extra_env
+            extra_env=extra_env,
+            gameid=gameid,
+            store=store,
+            mangohud=mangohud
         )
     except AssertionError as e:
         abort(str(e))
