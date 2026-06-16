@@ -10,7 +10,8 @@ import string
 import subprocess
 import sys
 
-SEXI_VERSION = "0.0.2"
+SEXI_VERSION = "0.0.3"
+PFX_ROOT = os.environ.get("SEXI_PFX_ROOT", "~/.pfx")
 
 def abort(message: str):
     if sys.stdin.isatty():
@@ -27,7 +28,7 @@ def validate_prefix(prefix: str):
         assert os.path.exists(prefix), "Prefix path doesn't exist"
     else:
         assert set(prefix) <= set(string.ascii_lowercase + string.ascii_uppercase + string.digits + '-_'), "Invalid characters in prefix"
-        prefix = os.path.expanduser(f"~/.pfx/{prefix}")
+        prefix = os.path.expanduser(f"{PFX_ROOT}/{prefix}")
         os.makedirs(prefix, exist_ok=True)
     return prefix
 
@@ -80,7 +81,7 @@ def print_help():
     print("")
     print("---------- REQUIRED VALUES -----------------------------------------------------------------------------------------------")
     print("[main]")
-    print("prefix = [full path or prefix name]                 (full path must exist, prefix name will be autocreated in ~/.pfx/)")
+    print(f"prefix = [full path or prefix name]                 (full path must exist, prefix name will be autocreated in {PFX_ROOT}/)")
     print("compatibility_tool = [proton | umu | lutris-wine]   (you must have the appropriate tool installed)")
     print("runner_version = [desired proton version]           (you must have this proton or wine version already installed)")
     print("program = [program-name.exe]                        (path to exe from working directory)")
